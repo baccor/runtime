@@ -17,7 +17,12 @@ What it does NOT have:
 - Container state tracking
 - Exec(depends on state tracking)
 - Security profiles
-- port forward depends on net
+- Port forward independnet of net
+- Detailed syntax checking
+
+Requirements:
+-Iptables
+-Sudo
 
 To use just build it, also run with sudo if you're actually going to run it.
 If it errors with no container veth then run it again(should be fixed but possible)
