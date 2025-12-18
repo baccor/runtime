@@ -17,7 +17,7 @@ What it does NOT have:
 - Container state tracking
 - Exec(depends on state tracking)
 - Security profiles
-- Port forward independnet of net
+- Port forward independent of net
 - Detailed syntax checking
 
 Requirements:
