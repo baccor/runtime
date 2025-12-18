@@ -21,8 +21,8 @@ What it does NOT have:
 - Detailed syntax checking
 
 Requirements:
--Iptables
--Sudo
+- Iptables
+- Sudo
 
 To use just build it, also run with sudo if you're actually going to run it.
 If it errors with no container veth then run it again(should be fixed but possible)
