@@ -46,8 +46,3 @@ type Confjs struct {
 		Entrypoint []string `json:"Entrypoint"`
 	} `json:"Config"`
 }
-
-type State struct {
-	Free []string `json:"free"`
-	Used []string `json:"used"`
-}

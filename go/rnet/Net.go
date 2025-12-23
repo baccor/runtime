@@ -14,42 +14,37 @@ import (
 	"math/rand"
 )
 
-func NetH() error {
+func NetH(isnet bool) error {
+
+	exs := false
 
 	if _, err := netlink.LinkByName("brdg"); err == nil {
-		return nil
+		exs = true
 	} else if _, ok := err.(netlink.LinkNotFoundError); !ok {
 		return fmt.Errorf("error checking for bridge: %v", err)
 	}
 
-	br := &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "brdg"}}
+	if exs == false {
+		br := &netlink.Bridge{LinkAttrs: netlink.LinkAttrs{Name: "brdg"}}
 
-	if err := netlink.LinkAdd(br); err != nil {
-		return fmt.Errorf("error creating bridge: %v", err)
-	}
+		if err := netlink.LinkAdd(br); err != nil {
+			return fmt.Errorf("error creating bridge: %v", err)
+		}
 
-	addr := &netlink.Addr{IPNet: &net.IPNet{IP: net.IPv4(10, 0, 0, 1), Mask: net.CIDRMask(24, 32)}}
+		addr := &netlink.Addr{IPNet: &net.IPNet{IP: net.IPv4(10, 0, 0, 1), Mask: net.CIDRMask(24, 32)}}
 
-	if err := netlink.AddrAdd(br, addr); err != nil {
-		return fmt.Errorf("error assigning address to bridge: %v", err)
-	}
+		if err := netlink.AddrAdd(br, addr); err != nil {
+			return fmt.Errorf("error assigning address to bridge: %v", err)
+		}
 
-	if err := netlink.LinkSetUp(br); err != nil {
-		return fmt.Errorf("error setting up bridge: %v", err)
-	}
+		if err := netlink.LinkSetUp(br); err != nil {
+			return fmt.Errorf("error setting up bridge: %v", err)
+		}
 
-	ipf := "/proc/sys/net/ipv4/ip_forward"
-	if err := os.WriteFile(ipf, []byte("1"), 0644); err != nil {
-		return fmt.Errorf("error enabling IP forwarding: %v", err)
-	}
-
-	intf, err := dif()
-	if err != nil {
-		return fmt.Errorf("error determining default interface: %v", err)
-	}
-
-	if err := masq(intf); err != nil {
-		return fmt.Errorf("error setting up masquerading: %v", err)
+		ipf := "/proc/sys/net/ipv4/ip_forward"
+		if err := os.WriteFile(ipf, []byte("1"), 0644); err != nil {
+			return fmt.Errorf("error enabling IP forwarding: %v", err)
+		}
 	}
 
 	return nil
@@ -158,7 +153,7 @@ func Chnet() error {
 	return nil
 }
 
-func dif() (string, error) {
+func Dif() (string, error) {
 
 	rts, err := netlink.RouteGet(net.IPv4(8, 8, 8, 8))
 
@@ -305,25 +300,25 @@ func lhostrt() error {
 	return nil
 }
 
-func masq(intf string) error {
-	iptbls := exec.Command("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", "10.0.0.0/24", "-o", intf, "-j", "MASQUERADE")
+func Masq(intf, ip string) error {
+	iptbls := exec.Command("iptables", "-t", "nat", "-C", "POSTROUTING", "-s", ip, "-o", intf, "-j", "MASQUERADE")
 	if err := iptbls.Run(); err == nil {
 		return nil
 	}
 
-	iptblsr := exec.Command("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", "10.0.0.0/24", "-o", intf, "-j", "MASQUERADE")
+	iptblsr := exec.Command("iptables", "-t", "nat", "-A", "POSTROUTING", "-s", ip, "-o", intf, "-j", "MASQUERADE")
 	if err := iptblsr.Run(); err != nil {
 		return fmt.Errorf("error setting up masquerading: %v", err)
 	}
 
 	nat := exec.Command("iptables", "-A", "FORWARD",
-		"-s", "10.0.0.0/24", "-o", intf, "-j", "ACCEPT")
+		"-s", ip, "-o", intf, "-j", "ACCEPT")
 	if err := nat.Run(); err != nil {
 		return fmt.Errorf("error setting up NAT: %v", err)
 	}
 
 	natn := exec.Command("iptables", "-A", "FORWARD",
-		"-d", "10.0.0.0/24",
+		"-d", ip,
 		"-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED",
 		"-j", "ACCEPT")
 	if err := natn.Run(); err != nil {
@@ -335,7 +330,7 @@ func masq(intf string) error {
 
 func Clnup() error {
 
-	intf, err := dif()
+	intf, err := Dif()
 	if err == nil {
 		_ = exec.Command("iptables", "-t", "nat", "-D", "POSTROUTING", "-s",
 			"10.0.0.0/24", "-o", intf, "-j", "MASQUERADE").Run()
@@ -353,6 +348,15 @@ func Clnup() error {
 	if err == nil {
 		lnks, err := netlink.LinkList()
 		if err == nil {
+
+			_, dst, _ := net.ParseCIDR("10.0.0.0/24")
+			rt := netlink.Route{
+				LinkIndex: br.Attrs().Index,
+				Dst:       dst,
+				Table:     100,
+			}
+			_ = netlink.RouteDel(&rt)
+
 			for _, lnk := range lnks {
 				if !strings.HasPrefix(lnk.Attrs().Name, "vethz") {
 					continue
@@ -375,28 +379,13 @@ func Clnup() error {
 		return fmt.Errorf("error disabling IP forwarding: %v", err)
 	}
 
+	_ = os.WriteFile("/proc/sys/net/ipv4/conf/all/route_localnet", []byte("0"), 0o644)
+
 	return nil
 
 }
 
-func PrtfD(ip net.IP, port string) error {
-	ips := ip.String()
-
-	rule := netlink.NewRule()
-	rule.Mark = 1
-	rule.Table = 100
-	_ = netlink.RuleDel(rule)
-
-	br, err := netlink.LinkByName("brdg")
-	if err == nil {
-		_, dst, _ := net.ParseCIDR("10.0.0.0/24")
-		rt := netlink.Route{
-			LinkIndex: br.Attrs().Index,
-			Dst:       dst,
-			Table:     100,
-		}
-		_ = netlink.RouteDel(&rt)
-	}
+func PrtfD(ip, port string) error {
 
 	prts := strings.Split(port, ":")
 	if len(prts) != 2 {
@@ -420,51 +409,49 @@ func PrtfD(ip net.IP, port string) error {
 		"-j", "MARK", "--set-mark", "1",
 	)
 	if out, err := mrk.CombinedOutput(); err != nil {
-		return fmt.Errorf("error deleting mark on localhost traffic: %v, output: %s", err, string(out))
+		return fmt.Errorf("error cleaning up mark on localhost traffic: %v, output: %s", err, string(out))
 	}
 
 	hportfrwd := exec.Command(
 		"iptables", "-t", "nat", "-D", "PREROUTING",
 		"-p", "tcp", "--dport", strconv.Itoa(hport),
-		"-j", "DNAT", "--to-destination", fmt.Sprintf("%s:%d", ips, cport),
+		"-j", "DNAT", "--to-destination", fmt.Sprintf("%s:%d", ip, cport),
 	)
 	if out, err := hportfrwd.CombinedOutput(); err != nil {
-		return fmt.Errorf("error deleting up port forwarding: %v, output: %s", err, string(out))
+		return fmt.Errorf("error cleaning up port forwarding: %v, output: %s", err, string(out))
 	}
 
 	houtfrwd := exec.Command(
 		"iptables", "-t", "nat", "-D", "OUTPUT",
 		"-p", "tcp", "--dport", strconv.Itoa(hport),
-		"-j", "DNAT", "--to-destination", fmt.Sprintf("%s:%d", ips, cport),
+		"-j", "DNAT", "--to-destination", fmt.Sprintf("%s:%d", ip, cport),
 	)
 
 	if out, err := houtfrwd.CombinedOutput(); err != nil {
-		return fmt.Errorf("error deleting up output port forwarding: %v, output: %s", err, string(out))
+		return fmt.Errorf("error cleaning up output port forwarding: %v, output: %s", err, string(out))
 	}
 
 	cportfrwd := exec.Command(
 		"iptables", "-D", "FORWARD", "-p", "tcp",
-		"-d", ips, "--dport", strconv.Itoa(cport),
+		"-d", ip, "--dport", strconv.Itoa(cport),
 		"-j", "ACCEPT",
 	)
 
 	if out, err := cportfrwd.CombinedOutput(); err != nil {
-		return fmt.Errorf("error deleting up port forwarding: %v, output: %s", err, string(out))
+		return fmt.Errorf("error cleaning up port forwarding: %v, output: %s", err, string(out))
 	}
 
 	snat := exec.Command(
 		"iptables", "-t", "nat", "-D", "POSTROUTING",
 		"-s", "127.0.0.1/32",
-		"-d", ips,
+		"-d", ip,
 		"-p", "tcp",
 		"--dport", strconv.Itoa(cport),
 		"-j", "SNAT", "--to-source", "10.0.0.1",
 	)
 	if out, err := snat.CombinedOutput(); err != nil {
-		return fmt.Errorf("error deleting up SNAT: %v, output: %s", err, string(out))
+		return fmt.Errorf("error cleaning up SNAT: %v, output: %s", err, string(out))
 	}
-
-	_ = os.WriteFile("/proc/sys/net/ipv4/conf/all/route_localnet", []byte("0"), 0o644)
 
 	return nil
 

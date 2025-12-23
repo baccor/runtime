@@ -4,30 +4,12 @@ import (
 	"bufio"
 	"fmt"
 	"mdkr/initz"
-	"mdkr/structs"
+	"mdkr/rnet"
 	"net"
 	"strings"
-	"sync"
 )
 
-type Snc struct {
-	mu    sync.Mutex
-	State structs.State
-}
-
-func AllocIp(s *Snc) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return initz.Alloc(&s.State)
-}
-
-func FrIp(ip string, s *Snc) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return initz.Fr(ip, &s.State)
-}
-
-func HCon(conn net.Conn, s *Snc) {
+func HCon(conn net.Conn) {
 	defer conn.Close()
 
 	r := bufio.NewReader(conn)
@@ -41,25 +23,93 @@ func HCon(conn net.Conn, s *Snc) {
 
 	switch parts[0] {
 	case "alloc":
-		ip, err := AllocIp(s)
-		if err != nil {
-			fmt.Fprintf(conn, "error %v\n", err)
+		if len(parts) == 3 {
+
+			ip, err := initz.Alloc(parts[1], parts[2])
+			if err != nil {
+				fmt.Fprintf(conn, "error %v\n", err)
+				return
+			}
+			fmt.Fprintf(conn, "allocated %s\n", ip)
+		} else if len(parts) == 2 {
+			ip, err := initz.Alloc(parts[1], "")
+			if err != nil {
+				fmt.Fprintf(conn, "error %v\n", err)
+				return
+			}
+			fmt.Fprintf(conn, "allocated %s\n", ip)
+			return
+		} else {
+			fmt.Fprintln(conn, "error unknown command")
 			return
 		}
-		fmt.Fprintf(conn, "allocated %s\n", ip)
 
 	case "free":
-		if len(parts) != 2 {
-			fmt.Fprintln(conn, "error bad syntax")
+		if len(parts) == 3 {
+
+			if err := initz.Cln(parts[1], parts[2]); err != nil {
+				fmt.Fprintf(conn, "error %v\n", err)
+				return
+			}
+			fmt.Fprintln(conn, "freed")
+			return
+		} else if len(parts) == 2 {
+			if err := initz.Cln(parts[1], ""); err != nil {
+				fmt.Fprintf(conn, "error %v\n", err)
+				return
+			}
+			fmt.Fprintln(conn, "freed")
+			return
+		} else {
+			fmt.Fprintln(conn, "error unknown command")
 			return
 		}
-		if err := FrIp(parts[1], s); err != nil {
+
+	case "prenet":
+		if len(parts) == 2 && parts[1] == "net" {
+			if err := rnet.NetH(true); err != nil {
+				fmt.Fprintf(conn, "error %v\n", err)
+				return
+			}
+			fmt.Fprintln(conn, "done")
+		} else if len(parts) == 1 {
+			if err := rnet.NetH(false); err != nil {
+				fmt.Fprintf(conn, "error %v\n", err)
+				return
+			}
+			fmt.Fprintln(conn, "done")
+		} else {
+			fmt.Fprintln(conn, "error unknown prenet command")
+			return
+		}
+
+	case "pidreg":
+		if len(parts) != 2 && len(parts) != 3 {
 			fmt.Fprintf(conn, "error %v\n", err)
 			return
 		}
-		fmt.Fprintln(conn, "freed")
+		if len(parts) == 2 {
+			if err := initz.Pidregd(parts[1], ""); err != nil {
+				fmt.Fprintf(conn, "error %v\n", err)
+				return
+			}
+			fmt.Fprintln(conn, "done")
+			return
+		}
+		if len(parts) == 3 {
+			if err := initz.Pidregd(parts[1], parts[2]); err != nil {
+				fmt.Fprintf(conn, "error %v\n", err)
+				return
+			}
+			fmt.Fprintln(conn, "done")
+			return
+		} else {
+			fmt.Fprintln(conn, "error unknown command")
+			return
+		}
 
 	default:
 		fmt.Fprintln(conn, "error unknown command")
+		return
 	}
 }

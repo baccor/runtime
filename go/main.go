@@ -19,12 +19,15 @@ func main() {
 
 	case "pullexp":
 		runtimed.Exp(os.Args)
+		os.Exit(0)
 
 	case "run":
 		runtimed.Run(os.Args)
+		os.Exit(0)
 
 	case "pullnrun":
 		runtimed.Pnr(os.Args)
+		os.Exit(0)
 
 	default:
 		fmt.Println("Usage: dckr <pullexp/run/pullnrun> [args...]")

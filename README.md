@@ -8,17 +8,15 @@ Features:
 - Ip allocation via stateful IPAM daemon
 - Options for networking and port forwarding
 - Go userspace controller
+- State tracking
 
 
 What it does NOT have:
 - Support for several tar header types(xattrs, fifos, sparse, etc.)
 - Cgroup resource limits
 - Overlayfs
-- Container state tracking
-- Exec(depends on state tracking)
+- Exec
 - Security profiles
-- Port forward independent of net
-- Detailed syntax checking
 
 Requirements:
 - Iptables
