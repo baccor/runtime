@@ -3,8 +3,10 @@ package runtimed
 import (
 	"archive/tar"
 	"bufio"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"mdkr/initz"
@@ -72,6 +74,21 @@ func Pullexp(img string) (tmppth string, imgstr *structs.Img, err error) {
 	return basepth, &imgstruct, nil
 }
 
+func gz(r io.Reader) (io.Reader, io.Closer, error) {
+	br := bufio.NewReader(r)
+
+	hdr, err := br.Peek(2)
+	if err == nil && len(hdr) == 2 && hdr[0] == 0x1f && hdr[1] == 0x8b {
+		gr, err := gzip.NewReader(br)
+		if err != nil {
+			return nil, nil, err
+		}
+		return gr, gr, nil
+	}
+
+	return br, io.NopCloser(nil), nil
+}
+
 func makec(imgstruct *structs.Img, basepth string) error {
 	meta := make(map[string]structs.Metadata)
 
@@ -82,11 +99,20 @@ func makec(imgstruct *structs.Img, basepth string) error {
 		if err != nil {
 			return fmt.Errorf("error opening layer %s: %w", layer, err)
 		}
-		tr := tar.NewReader(f)
+
+		g, gc, err := gz(f)
+		if err != nil {
+			f.Close()
+			return fmt.Errorf("gzip wrap failed for %s: %w", layer, err)
+		}
+
+		tr := tar.NewReader(g)
 		if err := whiteouts.Whiteouts(tr, meta, basepth); err != nil {
+			gc.Close()
 			f.Close()
 			return fmt.Errorf("error processing layer %s: %w", layer, err)
 		}
+		gc.Close()
 		f.Close()
 
 	}
