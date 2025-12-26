@@ -21,6 +21,7 @@ What it does NOT have:
 Requirements:
 - Iptables
 - Sudo
+- Docker(just for pulls & saves)
 
 To use just build it, also run with sudo if you're actually going to run it.
 If it errors with no container veth then run it again(should be fixed but possible)
