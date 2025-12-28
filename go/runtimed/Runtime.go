@@ -240,7 +240,7 @@ func Runet(img, port string, isnet bool, conf structs.Confjs) error {
 	}
 
 	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGHUP)
+	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGHUP, syscall.SIGINT)
 
 	done := make(chan struct{})
 
