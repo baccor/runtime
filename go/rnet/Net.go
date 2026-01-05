@@ -188,10 +188,6 @@ func Prtf(ip net.IP, port string) error {
 		return fmt.Errorf("error enabling route_localnet: %v", err)
 	}
 
-	if err := lhostrt(); err != nil {
-		return fmt.Errorf("error setting up localhost routing: %v", err)
-	}
-
 	ips := ip.String()
 
 	prts := strings.Split(port, ":")
@@ -209,27 +205,8 @@ func Prtf(ip net.IP, port string) error {
 		return fmt.Errorf("invalid container port: %v", err)
 	}
 
-	mrk := exec.Command(
-		"iptables", "-t", "mangle", "-A", "OUTPUT",
-		"-p", "tcp",
-		"--dport", strconv.Itoa(hport),
-		"-j", "MARK", "--set-mark", "1",
-	)
-	if out, err := mrk.CombinedOutput(); err != nil {
-		return fmt.Errorf("error setting mark on localhost traffic: %v, output: %s", err, string(out))
-	}
-
-	hportfrwd := exec.Command(
-		"iptables", "-t", "nat", "-A", "PREROUTING",
-		"-p", "tcp", "--dport", strconv.Itoa(hport),
-		"-j", "DNAT", "--to-destination", fmt.Sprintf("%s:%d", ips, cport),
-	)
-	if out, err := hportfrwd.CombinedOutput(); err != nil {
-		return fmt.Errorf("error setting up port forwarding: %v, output: %s", err, string(out))
-	}
-
 	houtfrwd := exec.Command(
-		"iptables", "-t", "nat", "-A", "OUTPUT",
+		"iptables", "-t", "nat", "-A", "OUTPUT", "-d", "127.0.0.1/32",
 		"-p", "tcp", "--dport", strconv.Itoa(hport),
 		"-j", "DNAT", "--to-destination", fmt.Sprintf("%s:%d", ips, cport),
 	)
@@ -262,42 +239,6 @@ func Prtf(ip net.IP, port string) error {
 
 	return nil
 
-}
-
-func lhostrt() error {
-
-	rule := netlink.NewRule()
-	rule.Mark = 1
-	rule.Table = 100
-
-	if err := netlink.RuleAdd(rule); err != nil {
-		if !os.IsExist(err) && !strings.Contains(err.Error(), "file exists") {
-			return fmt.Errorf("error adding routing rule: %v", err)
-		}
-	}
-
-	br, err := netlink.LinkByName("brdg")
-	if err != nil {
-		return fmt.Errorf("error retrieving bridge: %v", err)
-	}
-
-	_, dst, err := net.ParseCIDR("10.0.0.0/24")
-	if err != nil {
-		return fmt.Errorf("error parsing CIDR: %v", err)
-	}
-
-	rt := netlink.Route{
-		LinkIndex: br.Attrs().Index,
-		Dst:       dst,
-		Table:     100,
-	}
-
-	if err := netlink.RouteAdd(&rt); err != nil {
-		if !os.IsExist(err) && !strings.Contains(err.Error(), "file exists") {
-			return fmt.Errorf("error adding route in table 100: %v", err)
-		}
-	}
-	return nil
 }
 
 func Masq(intf, ip string) error {
@@ -349,14 +290,6 @@ func Clnup() error {
 		lnks, err := netlink.LinkList()
 		if err == nil {
 
-			_, dst, _ := net.ParseCIDR("10.0.0.0/24")
-			rt := netlink.Route{
-				LinkIndex: br.Attrs().Index,
-				Dst:       dst,
-				Table:     100,
-			}
-			_ = netlink.RouteDel(&rt)
-
 			for _, lnk := range lnks {
 				if !strings.HasPrefix(lnk.Attrs().Name, "vethz") {
 					continue
@@ -400,25 +333,6 @@ func PrtfD(ip, port string) error {
 	cport, err := strconv.Atoi(prts[1])
 	if err != nil {
 		return fmt.Errorf("invalid container port: %v", err)
-	}
-
-	mrk := exec.Command(
-		"iptables", "-t", "mangle", "-D", "OUTPUT",
-		"-p", "tcp",
-		"--dport", strconv.Itoa(hport),
-		"-j", "MARK", "--set-mark", "1",
-	)
-	if out, err := mrk.CombinedOutput(); err != nil {
-		return fmt.Errorf("error cleaning up mark on localhost traffic: %v, output: %s", err, string(out))
-	}
-
-	hportfrwd := exec.Command(
-		"iptables", "-t", "nat", "-D", "PREROUTING",
-		"-p", "tcp", "--dport", strconv.Itoa(hport),
-		"-j", "DNAT", "--to-destination", fmt.Sprintf("%s:%d", ip, cport),
-	)
-	if out, err := hportfrwd.CombinedOutput(); err != nil {
-		return fmt.Errorf("error cleaning up port forwarding: %v, output: %s", err, string(out))
 	}
 
 	houtfrwd := exec.Command(

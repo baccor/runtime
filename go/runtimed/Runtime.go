@@ -150,7 +150,7 @@ func Rm() error {
 	return nil
 }
 
-func Runet(img, port string, isnet bool, conf structs.Confjs) error {
+func Runet(img, port string, isnet bool, conf structs.Confjs, cenv string) error {
 
 	if err := Rundae(); err != nil {
 		return fmt.Errorf("error initalizing daemon: %v", err)
@@ -182,6 +182,10 @@ func Runet(img, port string, isnet bool, conf structs.Confjs) error {
 	}
 	if len(conf.Config.Env) > 0 {
 		env = append(env, conf.Config.Env...)
+	}
+	if cenv != "" {
+		prts := strings.Split(cenv, ",")
+		env = append(env, prts...)
 	}
 	hasPath := false
 	for _, e := range env {
@@ -270,21 +274,6 @@ func Frk(rootfs string) error {
 		return fmt.Errorf("error making mounts private: %v", err)
 	}
 
-	devdir := filepath.Join(rootfs, "dev")
-	if err := os.MkdirAll(devdir, 0755); err != nil {
-		return fmt.Errorf("error creating /dev: %v", err)
-	}
-	null := filepath.Join(devdir, "null")
-	f, err := os.OpenFile(null, os.O_CREATE, 0666)
-	if err != nil {
-		return fmt.Errorf("error creating /dev/null: %v", err)
-	}
-	f.Close()
-
-	if err := syscall.Mount("/dev/null", null, "", syscall.MS_BIND, ""); err != nil {
-		return fmt.Errorf("error mounting /dev/null: %v", err)
-	}
-
 	if err := rootpv(rootfs); err != nil {
 		return err
 	}
@@ -293,9 +282,36 @@ func Frk(rootfs string) error {
 		return fmt.Errorf("error creating /proc: %v", err)
 	}
 
-	flgs := syscall.MS_NODEV | syscall.MS_NOSUID | syscall.MS_NOEXEC
-	if err := syscall.Mount("proc", "/proc", "proc", uintptr(flgs), ""); err != nil {
+	flgs := uintptr(syscall.MS_NODEV | syscall.MS_NOSUID | syscall.MS_NOEXEC)
+	if err := syscall.Mount("proc", "/proc", "proc", flgs, ""); err != nil {
 		return fmt.Errorf("error mounting /proc: %v", err)
+	}
+
+	if err := os.MkdirAll("/dev", 0755); err != nil {
+		return fmt.Errorf("error creating /dev: %v", err)
+	}
+
+	fl := uintptr(syscall.MS_NOSUID | syscall.MS_STRICTATIME)
+	if err := syscall.Mount("devtmpfs", "/dev", "devtmpfs", fl, ""); err != nil {
+		return fmt.Errorf("error mounting devtmpfs on /dev: %v", err)
+	}
+
+	_ = os.Remove("/dev/fd")
+	_ = os.Remove("/dev/stdin")
+	_ = os.Remove("/dev/stdout")
+	_ = os.Remove("/dev/stderr")
+
+	if err := os.Symlink("/proc/self/fd", "/dev/fd"); err != nil && !os.IsExist(err) {
+		return fmt.Errorf("error creating /dev/fd: %v", err)
+	}
+	if err := os.Symlink("/proc/self/fd/0", "/dev/stdin"); err != nil && !os.IsExist(err) {
+		return fmt.Errorf("error creating /dev/stdin: %v", err)
+	}
+	if err := os.Symlink("/proc/self/fd/1", "/dev/stdout"); err != nil && !os.IsExist(err) {
+		return fmt.Errorf("error creating /dev/stdout: %v", err)
+	}
+	if err := os.Symlink("/proc/self/fd/2", "/dev/stderr"); err != nil && !os.IsExist(err) {
+		return fmt.Errorf("error creating /dev/stderr: %v", err)
 	}
 
 	if err := os.MkdirAll("/sys", 0555); err != nil {
@@ -350,13 +366,7 @@ func Frk(rootfs string) error {
 	}
 	env := os.Environ()
 
-	fmt.Printf("MINIDKR_STR raw: %q\n", os.Getenv("MINIDKR_STR"))
-	fmt.Printf("argv decoded: %#v\n", str)
-
-	fmt.Printf("PATH inside container: %q\n", os.Getenv("PATH"))
-
 	path, err := exec.LookPath(str[0])
-	fmt.Printf("LookPath(%q) = %q, err = %v\n", str[0], path, err)
 	if err != nil {
 		return fmt.Errorf("lookpath failed for %q: %v", str[0], err)
 	}
@@ -397,37 +407,26 @@ func rootpv(rootfs string) error {
 	return nil
 }
 
-func Pullnrun(imgpth string, isnet bool, port string) error {
+func Pullnrun(imgpth string, isnet bool, port, cenv string) error {
 
 	tmppth, imgstruct, err := Pullexp(imgpth)
 	if err != nil {
 		return fmt.Errorf("error pulling and exporting image: %v", err)
 	}
+	defer os.RemoveAll(tmppth)
 	confstr, err := Confp(imgstruct)
 	if err != nil {
 		return fmt.Errorf("error parsing config: %v", err)
 	}
 
-	if isnet && port != "" {
-		if err := Runet(tmppth, port, true, confstr); err != nil {
+	if isnet {
+		if err := Runet(tmppth, port, true, confstr, cenv); err != nil {
 			return fmt.Errorf("error running container with network: %v", err)
 		}
-	} else if isnet {
-		if err := Runet(tmppth, "", true, confstr); err != nil {
+	} else if !isnet {
+		if err := Runet(tmppth, port, false, confstr, cenv); err != nil {
 			return fmt.Errorf("error running container with network: %v", err)
 		}
-	} else if port != "" {
-		if err := Runet(tmppth, port, false, confstr); err != nil {
-			return fmt.Errorf("error running container with port forwarding: %v", err)
-		}
-	} else {
-		if err := Runet(tmppth, "", false, confstr); err != nil {
-			return fmt.Errorf("error running container: %v", err)
-		}
-	}
-
-	if err := os.RemoveAll(tmppth); err != nil {
-		return fmt.Errorf("error removing temporary container filesystem: %v", err)
 	}
 
 	return nil
@@ -742,8 +741,8 @@ func Rundae() error {
 }
 
 func Run(args []string) {
-	if len(os.Args) > 5 || len(os.Args) < 3 {
-		fmt.Println("Usage: dckr run <Img/rootfs destination> {net} {host:port}")
+	if len(os.Args) > 5 && os.Args[1] == "run" || len(os.Args) < 3 && os.Args[1] == "run" {
+		fmt.Println("Usage: dckr run <Img/rootfs destination> {net} {host:port} {ENV=VAL,ENV=VAL...}")
 		os.Exit(1)
 	}
 
@@ -759,7 +758,7 @@ func Run(args []string) {
 		if !isdir {
 			defer Delbase(path)
 		}
-		if err := Runet(path, "", false, confjs); err != nil {
+		if err := Runet(path, "", false, confjs, ""); err != nil {
 			fmt.Fprintf(os.Stderr, "error running image: %v\n", err)
 			os.Exit(1)
 		}
@@ -776,12 +775,12 @@ func Run(args []string) {
 			if !isdir {
 				defer Delbase(path)
 			}
-			if err := Runet(path, "", true, confjs); err != nil {
+			if err := Runet(path, "", true, confjs, ""); err != nil {
 				fmt.Fprintf(os.Stderr, "error running image: %v\n", err)
 				os.Exit(1)
 			}
 			return
-		} else if os.Args[3] != "net" {
+		} else if strings.Contains(os.Args[3], "=") {
 			path, confjs, err, isdir := Iftar(os.Args[2])
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "error preparing image: %v", err)
@@ -790,19 +789,33 @@ func Run(args []string) {
 			if !isdir {
 				defer Delbase(path)
 			}
-			if err := Runet(path, os.Args[3], false, confjs); err != nil {
+			if err := Runet(path, "", false, confjs, os.Args[3]); err != nil {
+				fmt.Fprintf(os.Stderr, "error running image: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		} else if strings.Contains(os.Args[3], ":") {
+			path, confjs, err, isdir := Iftar(os.Args[2])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error preparing image: %v", err)
+				os.Exit(1)
+			}
+			if !isdir {
+				defer Delbase(path)
+			}
+			if err := Runet(path, os.Args[3], false, confjs, ""); err != nil {
 				fmt.Fprintf(os.Stderr, "error running image: %v\n", err)
 				os.Exit(1)
 			}
 			return
 		} else {
-			fmt.Println("Usage: dckr pullnrun <image> {net} {host:port}")
+			fmt.Println("Usage: dckr run <Img/rootfs destination> {net} {host:port} {ENV=VAL,ENV=VAL...}")
 			os.Exit(1)
 		}
 
 	case 5:
 
-		if os.Args[3] == "net" {
+		if os.Args[3] == "net" && strings.Contains(os.Args[4], "=") {
 
 			path, confjs, err, isdir := Iftar(os.Args[2])
 			if err != nil {
@@ -812,19 +825,68 @@ func Run(args []string) {
 			if !isdir {
 				defer Delbase(path)
 			}
-			if err := Runet(path, os.Args[4], true, confjs); err != nil {
+			if err := Runet(path, "", true, confjs, os.Args[4]); err != nil {
+				fmt.Fprintf(os.Stderr, "error running image: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		} else if os.Args[3] == "net" && strings.Contains(os.Args[4], ":") {
+			path, confjs, err, isdir := Iftar(os.Args[2])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error preparing image: %v", err)
+				os.Exit(1)
+			}
+			if !isdir {
+				defer Delbase(path)
+			}
+			if err := Runet(path, os.Args[4], true, confjs, ""); err != nil {
+				fmt.Fprintf(os.Stderr, "error running image: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		} else if strings.Contains(os.Args[3], ":") && strings.Contains(os.Args[4], "=") {
+			path, confjs, err, isdir := Iftar(os.Args[2])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error preparing image: %v", err)
+				os.Exit(1)
+			}
+			if !isdir {
+				defer Delbase(path)
+			}
+			if err := Runet(path, os.Args[3], true, confjs, os.Args[4]); err != nil {
 				fmt.Fprintf(os.Stderr, "error running image: %v\n", err)
 				os.Exit(1)
 			}
 			return
 		} else {
-			fmt.Println("Usage: dckr pullnrun <image> {net} {host:port}")
+			fmt.Println("Usage: dckr run <Img/rootfs destination> {net} {host:port} {ENV=VAL,ENV=VAL...}")
+			os.Exit(1)
+		}
+
+	case 6:
+
+		if strings.Contains(os.Args[4], ":") && strings.Contains(os.Args[5], "=") {
+			path, confjs, err, isdir := Iftar(os.Args[2])
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error preparing image: %v", err)
+				os.Exit(1)
+			}
+			if !isdir {
+				defer Delbase(path)
+			}
+			if err := Runet(path, os.Args[4], true, confjs, os.Args[5]); err != nil {
+				fmt.Fprintf(os.Stderr, "error running image: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		} else {
+			fmt.Println("Usage: dckr run <Img/rootfs destination> {net} {host:port} {ENV=VAL,ENV=VAL...}")
 			os.Exit(1)
 		}
 
 	default:
 
-		fmt.Println("Usage: dckr pullnrun <image> {net} {host:port}")
+		fmt.Println("Usage: dckr run <Img/rootfs destination> {net} {host:port} {ENV=VAL,ENV=VAL...}")
 		os.Exit(1)
 
 	}
@@ -832,8 +894,8 @@ func Run(args []string) {
 }
 
 func Pnr(args []string) {
-	if len(os.Args) < 3 || len(os.Args) > 5 {
-		fmt.Println("Usage: dckr pullnrun <image> {net} {host:port}")
+	if len(os.Args) < 3 || len(os.Args) > 6 {
+		fmt.Println("Usage: dckr pullnrun <image> {net} {host:port} {ENV=VAR,ENV=VAR...}")
 		os.Exit(1)
 	}
 
@@ -841,7 +903,7 @@ func Pnr(args []string) {
 
 	case 3:
 
-		if err := Pullnrun(os.Args[2], false, ""); err != nil {
+		if err := Pullnrun(os.Args[2], false, "", ""); err != nil {
 			fmt.Fprintf(os.Stderr, "pullnrun error: %v\n", err)
 			os.Exit(1)
 		}
@@ -850,13 +912,17 @@ func Pnr(args []string) {
 
 		if os.Args[3] == "net" {
 
-			if err := Pullnrun(os.Args[2], true, ""); err != nil {
+			if err := Pullnrun(os.Args[2], true, "", ""); err != nil {
+				fmt.Fprintf(os.Stderr, "pullnrun error: %v\n", err)
+				os.Exit(1)
+			}
+		} else if strings.Contains(os.Args[3], "=") {
+			if err := Pullnrun(os.Args[2], false, "", os.Args[3]); err != nil {
 				fmt.Fprintf(os.Stderr, "pullnrun error: %v\n", err)
 				os.Exit(1)
 			}
 		} else {
-
-			if err := Pullnrun(os.Args[2], false, os.Args[3]); err != nil {
+			if err := Pullnrun(os.Args[2], false, os.Args[3], ""); err != nil {
 				fmt.Fprintf(os.Stderr, "pullnrun error: %v\n", err)
 				os.Exit(1)
 			}
@@ -865,11 +931,27 @@ func Pnr(args []string) {
 
 	case 5:
 
-		if os.Args[3] == "net" {
-			if err := Pullnrun(os.Args[2], true, os.Args[4]); err != nil {
+		if os.Args[3] == "net" && strings.Contains(os.Args[4], "=") {
+			if err := Pullnrun(os.Args[2], true, "", os.Args[4]); err != nil {
 				fmt.Fprintf(os.Stderr, "pullnrun error: %v\n", err)
 				os.Exit(1)
 			}
+		} else if os.Args[3] == "net" {
+			if err := Pullnrun(os.Args[2], true, os.Args[4], ""); err != nil {
+				fmt.Fprintf(os.Stderr, "pullnrun error: %v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			if err := Pullnrun(os.Args[2], false, os.Args[3], os.Args[4]); err != nil {
+				fmt.Fprintf(os.Stderr, "pullnrun error: %v\n", err)
+				os.Exit(1)
+			}
+		}
+
+	case 6:
+		if err := Pullnrun(os.Args[2], true, os.Args[4], os.Args[5]); err != nil {
+			fmt.Fprintf(os.Stderr, "pullnrun error: %v\n", err)
+			os.Exit(1)
 		}
 
 	default:

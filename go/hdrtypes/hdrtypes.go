@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -60,18 +59,15 @@ func Tarfile(basepth string, hdr *tar.Header, tr *tar.Reader) error {
 	mode := hdr.FileInfo().Mode()
 
 	if err := os.Chmod(targetpth, mode.Perm()); err != nil {
-		return fmt.Errorf("error setting permissions on file %s: %v", targetpth, err)
+		fmt.Printf("cannot set permissions on file %s: %v", targetpth, err)
 	}
 
 	if err := os.Chown(targetpth, hdr.Uid, hdr.Gid); err != nil {
-		if !errors.Is(err, syscall.EPERM) {
-			return fmt.Errorf("error setting ownership on file %s: %v", targetpth, err)
-		}
-		fmt.Printf("Warning: unable to change ownership of file %s: %v\n", targetpth, err)
+		fmt.Printf("unable to change ownership of file %s: %v\n", targetpth, err)
 	}
 
 	if err := os.Chtimes(targetpth, hdr.AccessTime, hdr.ModTime); err != nil {
-		return fmt.Errorf("error setting times on file %s: %v", targetpth, err)
+		fmt.Printf("cannot set times on file %s: %v", targetpth, err)
 	}
 
 	return nil
