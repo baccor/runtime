@@ -2,11 +2,11 @@ Custom container runtime written in Go.
 
 Features:
 - No dependencies-ish
-- Custom OCI image extractor
+- Custom OCI(whiteouts/layers) image extractor
 - Linux namespace isolation
 - Custom Networking (veth pairs, NAT, Port forwarding)
-- Ip allocation via stateful IPAM daemon
-- Options for networking and port forwarding
+- Network management via stateful IPAM daemon
+- Options for networking, port forwarding, custom envs
 - Go userspace controller
 - State tracking
 
@@ -17,6 +17,7 @@ What it does NOT have:
 - Overlayfs
 - Exec
 - Security profiles
+- 
 
 Requirements:
 - Iptables
