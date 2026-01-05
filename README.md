@@ -17,7 +17,6 @@ What it does NOT have:
 - Overlayfs
 - Exec
 - Security profiles
-- 
 
 Requirements:
 - Iptables
