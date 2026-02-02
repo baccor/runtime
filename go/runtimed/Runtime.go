@@ -425,7 +425,7 @@ func Pullnrun(imgpth string, isnet bool, port, cenv string) error {
 		}
 	} else if !isnet {
 		if err := Runet(tmppth, port, false, confstr, cenv); err != nil {
-			return fmt.Errorf("error running container with network: %v", err)
+			return fmt.Errorf("error running container: %v", err)
 		}
 	}
 
@@ -519,12 +519,12 @@ const skt = "/run/minidkr.sock"
 func Daeinit() error {
 
 	if err := initz.Init(); err != nil {
-		log.Fatalf("error initializing state: %v", err)
+		return fmt.Errorf("error initializing state: %v", err)
 	}
 
 	ln, err := net.Listen("unix", skt)
 	if err != nil {
-		log.Fatalf("listen on %s: %v", skt, err)
+		return fmt.Errorf("listen on %s: %v", skt, err)
 	}
 	defer ln.Close()
 
@@ -532,7 +532,7 @@ func Daeinit() error {
 		log.Printf("chmod socket: %v", err)
 	}
 
-	log.Printf("minidkrd listening on %s", skt)
+	log.Printf("daemon listening on %s", skt)
 
 	for {
 		conn, err := ln.Accept()
@@ -647,7 +647,7 @@ func pidreg(pid, ipa string) error {
 	}
 
 	if _, err := fmt.Fprintln(conn, "pidreg", pid, ipa); err != nil {
-		return fmt.Errorf("error freeing ip: %w", err)
+		return fmt.Errorf("error registering ip: %w", err)
 	}
 
 	r := bufio.NewReader(conn)
@@ -703,6 +703,43 @@ func IPfree(pid, ip string) error {
 
 	switch parts[0] {
 	case "freed":
+		return nil
+	case "error":
+		if len(parts) == 2 {
+			return fmt.Errorf("daemon error: %s", parts[1])
+		}
+		return fmt.Errorf("daemon error")
+	default:
+		return fmt.Errorf("error, unexpected response: %q", line)
+	}
+}
+
+func Pidc(pid string) error {
+	conn, err := net.Dial("unix", skt)
+	if err != nil {
+		return fmt.Errorf("dial daemon: %w", err)
+	}
+	defer conn.Close()
+
+	if _, err := fmt.Fprintln(conn, "pidchk", pid); err != nil {
+		return fmt.Errorf("error checking pid: %w", err)
+	}
+
+	r := bufio.NewReader(conn)
+	line, err := r.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("error reading response: %w", err)
+	}
+
+	line = strings.TrimSpace(line)
+	parts := strings.SplitN(line, " ", 2)
+
+	if len(parts) == 0 {
+		return fmt.Errorf("error: no response from daemon")
+	}
+
+	switch parts[0] {
+	case "done":
 		return nil
 	case "error":
 		if len(parts) == 2 {
@@ -997,22 +1034,22 @@ func Exp(args []string) int {
 	return 0
 }
 
-func Pre(args []string) {
+func Pre(args []string) error {
 	if len(os.Args) == 2 && os.Args[1] == "init" {
 		signal.Ignore(syscall.SIGHUP, syscall.SIGINT)
 		if err := Daeinit(); err != nil {
-			log.Fatalf("daemon exited: %v", err)
-			return
+			return err
 		}
-		return
+		return nil
 	}
 
 	if len(os.Args) >= 3 && os.Args[1] == "frk" {
 		if err := Frk(os.Args[2]); err != nil {
 			fmt.Fprintf(os.Stderr, "fork error: %v\n", err)
-			return
+			return err
 		}
-		return
+		return nil
 	}
+	return nil
 
 }

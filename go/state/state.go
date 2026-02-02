@@ -108,6 +108,24 @@ func HCon(conn net.Conn) {
 			return
 		}
 
+	case "pidchk":
+
+		if len(parts) != 2 {
+			fmt.Fprintf(conn, "error %v\n", err)
+			return
+		}
+		if len(parts) == 2 {
+			if err := initz.Pidchk(parts[1]); err != nil {
+				fmt.Fprintf(conn, "error %v\n", err)
+				return
+			}
+			fmt.Fprintln(conn, "done")
+			return
+		} else {
+			fmt.Fprintln(conn, "error unknown command")
+			return
+		}
+
 	default:
 		fmt.Fprintln(conn, "error unknown command")
 		return

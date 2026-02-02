@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"mdkr/cgrps"
+	"mdkr/initz"
 	"mdkr/runtimed"
 	"os"
 )
@@ -12,6 +14,8 @@ func main() {
 		fmt.Println("Usage: dckr <pullexp/run/pullnrun> [args...]")
 		os.Exit(1)
 	}
+
+	initz.Init()
 
 	runtimed.Pre(os.Args)
 
@@ -25,6 +29,9 @@ func main() {
 
 	case "pullnrun":
 		os.Exit(runtimed.Pnr(os.Args))
+
+	case "lim":
+		os.Exit(cgrps.Lim(os.Args))
 
 	default:
 		fmt.Println("Usage: dckr <pullexp/run/pullnrun> [args...]")

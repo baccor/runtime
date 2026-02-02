@@ -89,6 +89,8 @@ func Alloc(isnet, port string) (string, error) {
 		return "", fmt.Errorf("error opening state: %w", err)
 	}
 	defer db.Close()
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	sqlc, err := db.Begin()
 	if err != nil {
@@ -195,12 +197,20 @@ func Pidregd(pid, ip string) error {
 		return fmt.Errorf("error opening state: %w", err)
 	}
 	defer db.Close()
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	sqlc, err := db.Begin()
 	if err != nil {
 		return err
 	}
 	defer func() { _ = sqlc.Rollback() }()
+
+	if ip != "" {
+		if err := rnet.NetC(pidi); err != nil {
+			return fmt.Errorf("error setting up network: %v", err)
+		}
+	}
 
 	if ip == "" {
 
@@ -210,10 +220,6 @@ func Pidregd(pid, ip string) error {
 		}
 		return sqlc.Commit()
 
-	}
-
-	if err := rnet.NetC(pidi); err != nil {
-		return fmt.Errorf("error setting up network: %v", err)
 	}
 
 	parts := strings.Split(ip, ".")
@@ -238,10 +244,21 @@ func Pidregd(pid, ip string) error {
 
 func Cln(pid, ip string) error {
 
+	var isnet int
+	var port sql.NullString
+	prts := strings.Split(ip, ".")
+	ipi := prts[len(prts)-1]
+	pidi, err := strconv.Atoi(pid)
+	if err != nil {
+		return err
+	}
+
 	db, err := sql.Open("sqlite", statesql)
 	if err != nil {
 		return fmt.Errorf("error opening state: %w", err)
 	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	defer db.Close()
 
 	sqlc, err := db.Begin()
@@ -264,12 +281,6 @@ func Cln(pid, ip string) error {
 
 	}
 
-	prts := strings.Split(ip, ".")
-	ipi := prts[len(prts)-1]
-
-	var isnet int
-	var port sql.NullString
-
 	err = sqlc.QueryRow(
 		`SELECT isnet, port FROM podnet WHERE ip = ?`,
 		ipi,
@@ -286,20 +297,8 @@ func Cln(pid, ip string) error {
 		prt = port.String
 	}
 
-	if prt != "" {
-		rnet.PrtfD(ip, prt)
-	}
-
 	var cnt int
 	if err := sqlc.QueryRow(`SELECT COUNT(*) FROM podnet`).Scan(&cnt); err != nil {
-		return err
-	}
-	if cnt == 1 {
-		rnet.Clnup()
-
-	}
-	pidi, err := strconv.Atoi(pid)
-	if err != nil {
 		return err
 	}
 	_, err = sqlc.Exec(`DELETE FROM pods WHERE pid = ?`, pidi)
@@ -312,10 +311,55 @@ func Cln(pid, ip string) error {
 		return err
 	}
 
+	sqlc.Commit()
+
+	if prt != "" {
+		rnet.PrtfD(ip, prt)
+	}
+
+	if cnt == 1 {
+		rnet.Clnup()
+	}
+
 	if err := unmasq(ip); err != nil {
 		return fmt.Errorf("error cleaning up masq")
 	}
 
-	return sqlc.Commit()
+	return nil
+}
+
+func Pidchk(pid string) error {
+
+	if pid == "" {
+		return fmt.Errorf("error checking for pid, empty")
+	}
+
+	pidi, err := strconv.Atoi(pid)
+
+	if err != nil {
+		return fmt.Errorf("error converting pid: %s", pid)
+	}
+	db, err := sql.Open("sqlite", statesql)
+	if err != nil {
+		return fmt.Errorf("error opening state: %w", err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
+	sqlc, err := db.Begin()
+	if err != nil {
+		return err
+	}
+
+	var p int
+	if err := sqlc.QueryRow(`SELECT 1 FROM pods WHERE pid = ?`, pidi).Scan(&p); err != nil {
+		return err
+	}
+
+	if p == 1 {
+		return nil
+	}
+	return fmt.Errorf("pid doesn't match or exists")
 
 }
