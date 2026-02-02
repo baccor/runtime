@@ -32,6 +32,6 @@ pullexp `<image:tag>` (the tag has to match the manifest reference)
 
 pullnrun `<image:tag>` {net} {host:port} {ENV=VAL,ENV=VAL...}
 
-run `<image tag || rootfs path(extracted using pullexp)>` {net} {host:port} {ENV=VAL,ENV=VAL...}
+run `<image path || rootfs path(extracted using pullexp)>` {net} {host:port} {ENV=VAL,ENV=VAL...}
 
 lim `<PID>` [cpu||mem||pid] `<value>`   
