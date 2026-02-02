@@ -946,7 +946,7 @@ func Run(args []string) int {
 
 func Pnr(args []string) int {
 	if len(os.Args) < 3 || len(os.Args) > 6 {
-		fmt.Println("Usage: dckr pullnrun <image> {net} {host:port} {ENV=VAR,ENV=VAR...}")
+		fmt.Println("Usage: dckr pullnrun <image> {net} {host:port} {ENV=VAL,ENV=VAL...}")
 		return 1
 	}
 
@@ -1012,7 +1012,7 @@ func Pnr(args []string) int {
 
 	default:
 
-		fmt.Println("Usage: dckr pullnrun <image> {net} {host:port}")
+		fmt.Println("Usage: dckr pullnrun <image> {net} {host:port} {ENV=VAL,ENV=VAL...}")
 		return 1
 	}
 }
